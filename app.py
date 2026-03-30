@@ -544,7 +544,7 @@ async def stream_chat_request(request_body):
 
     async def generate():
         async for completionChunk in response:
-            yield format_stream_response(completionChunk, history_metadata)
+            yield format_stream_response(completionChunk, history_metadata, None)
 
     return generate()
 
