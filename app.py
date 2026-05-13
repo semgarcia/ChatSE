@@ -946,30 +946,12 @@ async def generate_title(conversation_messages):
         return "New Conversation"
 # ====================== OPENAI COMPATIBLE ENDPOINTS FOR n8n ======================
 
-API_KEY = os.getenv("API_KEY")
+# API_KEY = os.getenv("API_KEY")   # ← Temporarily commented out
 
 async def verify_api_key():
-    if not API_KEY:
-        return None  # No key set → allow all requests (good for testing)
-    
-    # Check Authorization: Bearer <key> (used by n8n)
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        provided_key = auth_header.split("Bearer ")[1].strip()
-        if provided_key == API_KEY:
-            return None
-    
-    # Also support X-API-Key header
-    x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
-    if x_api_key and x_api_key == API_KEY:
-        return None
-    
-    # Allow browser testing without key for now
-    if not auth_header and not x_api_key:
-        logging.warning("Access without API key - allowed for testing")
-        return None
-    
-    return jsonify({"error": "Invalid or missing API Key"}), 401
+    # Temporarily disabled for testing (because of Conditional Access)
+    logging.info("API Key check is temporarily DISABLED")
+    return None
 
 
 @bp.route("/v1/models", methods=["GET"])
@@ -1008,7 +990,6 @@ async def openai_chat_completions():
         
         result = await complete_chat_request(chat_request)
         
-        # Extract the response text
         if isinstance(result, dict):
             content = result.get("answer") or result.get("message") or str(result)
         else:
