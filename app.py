@@ -946,89 +946,80 @@ async def generate_title(conversation_messages):
         return "New Conversation"
 # ====================== OPENAI COMPATIBLE ENDPOINTS FOR n8n ======================
 
-# API Key Protection
 API_KEY = os.getenv("API_KEY")
 
 async def verify_api_key():
     if not API_KEY:
-        return  # No key configured = open for now
+        return  # No key = skip check for now
+    
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        raise Exception("Missing or invalid Authorization header")
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
     
     provided_key = auth_header.split("Bearer ")[1].strip()
     if provided_key != API_KEY:
-        raise Exception("Invalid API Key")
+        raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
 @bp.route("/v1/models", methods=["GET"])
 async def openai_list_models():
-    await verify_api_key()
-    return jsonify({
-        "object": "list",
-        "data": [
-            {
-                "id": AZURE_OPENAI_MODEL_NAME or "gpt-4o-mini",
-                "object": "model",
-                "created": 1677652288,
-                "owned_by": "chatse"
-            }
-        ]
-    })
+    try:
+        await verify_api_key()
+        return jsonify({
+            "object": "list",
+            "data": [
+                {
+                    "id": AZURE_OPENAI_MODEL_NAME or "gpt-4o-mini",
+                    "object": "model",
+                    "created": 1677652288,
+                    "owned_by": "chatse"
+                }
+            ]
+        })
+    except Exception as e:
+        logging.exception("Error in /v1/models")
+        return jsonify({"error": str(e)}), 500
 
 
 @bp.route("/v1/chat/completions", methods=["POST"])
 async def openai_chat_completions():
-    await verify_api_key()
-    
     try:
+        await verify_api_key()
+        
         request_json = await request.get_json()
         
-        # Convert OpenAI format to your existing conversation format
-        messages = request_json.get("messages", [])
-        
-        # Build the request body your existing function expects
+        # Prepare request for your existing logic
         chat_request = {
-            "messages": messages,
+            "messages": request_json.get("messages", []),
             "history_metadata": {},
-            "stream": False  # n8n usually prefers non-streaming for simplicity
+            "stream": False
         }
         
-        # Use your existing logic
-        response = await complete_chat_request(chat_request)
+        # Call your existing function
+        result = await complete_chat_request(chat_request)
         
-        # Convert your response to standard OpenAI format
-        if isinstance(response, dict) and "choices" in response:
-            # Already somewhat compatible
-            return jsonify(response)
+        # Try to extract the assistant's reply
+        if isinstance(result, dict):
+            content = result.get("answer") or result.get("message") or str(result)
         else:
-            # Extract the message content
-            content = ""
-            if isinstance(response, dict):
-                content = response.get("answer", response.get("message", str(response)))
-            
-            return jsonify({
-                "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-                "object": "chat.completion",
-                "created": int(uuid.uuid4().int % 1000000000),
-                "model": request_json.get("model", AZURE_OPENAI_MODEL_NAME),
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": content
-                        },
-                        "finish_reason": "stop"
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 100,
-                    "completion_tokens": 150,
-                    "total_tokens": 250
-                }
-            })
-            
+            content = str(result)
+
+        return jsonify({
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "object": "chat.completion",
+            "created": int(uuid.uuid4().int % 1000000000),
+            "model": request_json.get("model", AZURE_OPENAI_MODEL_NAME or "gpt-4o-mini"),
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150}
+        })
+        
     except Exception as e:
         logging.exception("Error in /v1/chat/completions")
         return jsonify({"error": str(e)}), 500
