@@ -950,17 +950,26 @@ API_KEY = os.getenv("API_KEY")
 
 async def verify_api_key():
     if not API_KEY:
-        return  # No key configured = open access for now
+        return None  # No key set → allow all requests (good for testing)
     
+    # Check Authorization: Bearer <key> (used by n8n)
     auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return jsonify({"error": "Missing or invalid Authorization header"}), 401
+    if auth_header and auth_header.startswith("Bearer "):
+        provided_key = auth_header.split("Bearer ")[1].strip()
+        if provided_key == API_KEY:
+            return None
     
-    provided_key = auth_header.split("Bearer ")[1].strip()
-    if provided_key != API_KEY:
-        return jsonify({"error": "Invalid API Key"}), 401
+    # Also support X-API-Key header
+    x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
+    if x_api_key and x_api_key == API_KEY:
+        return None
     
-    return None  # Success
+    # Allow browser testing without key for now
+    if not auth_header and not x_api_key:
+        logging.warning("Access without API key - allowed for testing")
+        return None
+    
+    return jsonify({"error": "Invalid or missing API Key"}), 401
 
 
 @bp.route("/v1/models", methods=["GET"])
