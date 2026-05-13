@@ -950,55 +950,56 @@ API_KEY = os.getenv("API_KEY")
 
 async def verify_api_key():
     if not API_KEY:
-        return  # No key = skip check for now
+        return  # No key configured = open access for now
     
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        return jsonify({"error": "Missing or invalid Authorization header"}), 401
     
     provided_key = auth_header.split("Bearer ")[1].strip()
     if provided_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
+        return jsonify({"error": "Invalid API Key"}), 401
+    
+    return None  # Success
 
 
 @bp.route("/v1/models", methods=["GET"])
 async def openai_list_models():
-    try:
-        await verify_api_key()
-        return jsonify({
-            "object": "list",
-            "data": [
-                {
-                    "id": AZURE_OPENAI_MODEL_NAME or "gpt-4o-mini",
-                    "object": "model",
-                    "created": 1677652288,
-                    "owned_by": "chatse"
-                }
-            ]
-        })
-    except Exception as e:
-        logging.exception("Error in /v1/models")
-        return jsonify({"error": str(e)}), 500
+    error_response = await verify_api_key()
+    if error_response:
+        return error_response
+    
+    return jsonify({
+        "object": "list",
+        "data": [
+            {
+                "id": AZURE_OPENAI_MODEL_NAME or "gpt-4o-mini",
+                "object": "model",
+                "created": 1677652288,
+                "owned_by": "chatse"
+            }
+        ]
+    })
 
 
 @bp.route("/v1/chat/completions", methods=["POST"])
 async def openai_chat_completions():
+    error_response = await verify_api_key()
+    if error_response:
+        return error_response
+    
     try:
-        await verify_api_key()
-        
         request_json = await request.get_json()
         
-        # Prepare request for your existing logic
         chat_request = {
             "messages": request_json.get("messages", []),
             "history_metadata": {},
             "stream": False
         }
         
-        # Call your existing function
         result = await complete_chat_request(chat_request)
         
-        # Try to extract the assistant's reply
+        # Extract the response text
         if isinstance(result, dict):
             content = result.get("answer") or result.get("message") or str(result)
         else:
