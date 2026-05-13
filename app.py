@@ -944,5 +944,92 @@ async def generate_title(conversation_messages):
     except Exception as e:
         logging.exception("Error generating title")
         return "New Conversation"
+# ====================== OPENAI COMPATIBLE ENDPOINTS FOR n8n ======================
 
+# API Key Protection
+API_KEY = os.getenv("API_KEY")
+
+async def verify_api_key():
+    if not API_KEY:
+        return  # No key configured = open for now
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise Exception("Missing or invalid Authorization header")
+    
+    provided_key = auth_header.split("Bearer ")[1].strip()
+    if provided_key != API_KEY:
+        raise Exception("Invalid API Key")
+
+
+@bp.route("/v1/models", methods=["GET"])
+async def openai_list_models():
+    await verify_api_key()
+    return jsonify({
+        "object": "list",
+        "data": [
+            {
+                "id": AZURE_OPENAI_MODEL_NAME or "gpt-4o-mini",
+                "object": "model",
+                "created": 1677652288,
+                "owned_by": "chatse"
+            }
+        ]
+    })
+
+
+@bp.route("/v1/chat/completions", methods=["POST"])
+async def openai_chat_completions():
+    await verify_api_key()
+    
+    try:
+        request_json = await request.get_json()
+        
+        # Convert OpenAI format to your existing conversation format
+        messages = request_json.get("messages", [])
+        
+        # Build the request body your existing function expects
+        chat_request = {
+            "messages": messages,
+            "history_metadata": {},
+            "stream": False  # n8n usually prefers non-streaming for simplicity
+        }
+        
+        # Use your existing logic
+        response = await complete_chat_request(chat_request)
+        
+        # Convert your response to standard OpenAI format
+        if isinstance(response, dict) and "choices" in response:
+            # Already somewhat compatible
+            return jsonify(response)
+        else:
+            # Extract the message content
+            content = ""
+            if isinstance(response, dict):
+                content = response.get("answer", response.get("message", str(response)))
+            
+            return jsonify({
+                "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                "object": "chat.completion",
+                "created": int(uuid.uuid4().int % 1000000000),
+                "model": request_json.get("model", AZURE_OPENAI_MODEL_NAME),
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": content
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 150,
+                    "total_tokens": 250
+                }
+            })
+            
+    except Exception as e:
+        logging.exception("Error in /v1/chat/completions")
+        return jsonify({"error": str(e)}), 500
 app = create_app()
